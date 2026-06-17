@@ -4,14 +4,22 @@
   "version": "0.1.0",
   "description": "Detect the key of a YouTube song and transpose it for play-along practice.",
   "minimum_chrome_version": "116",
-  "permissions": ["activeTab", "tabCapture", "offscreen", "storage"],
-  "host_permissions": ["https://www.youtube.com/*", "https://music.youtube.com/*"],
+  "permissions": [
+    "activeTab",
+    "tabCapture",
+    "offscreen",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://music.youtube.com/*"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "YouTube Key Transposer"
   },
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "src/background/background.js",
     "type": "module"
   }
 }

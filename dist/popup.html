@@ -4,12 +4,36 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YouTube Key Transposer</title>
+    <link rel="stylesheet" href="/src/popup/popup.css" />
     <script type="module" src="/src/popup/popup.js"></script>
   </head>
   <body>
-    <main id="app" class="app">
+    <main class="app">
       <h1>YouTube Key Transposer</h1>
-      <p id="status">Status: Idle</p>
+
+      <section class="panel" aria-label="Session status">
+        <div>Status: <span id="status">Idle</span></div>
+        <div>Detected: <span id="detectedKey">—</span></div>
+        <div>Confidence: <span id="confidence">—</span></div>
+      </section>
+
+      <section class="panel">
+        <label for="targetKey">Transpose to</label>
+        <select id="targetKey"></select>
+      </section>
+
+      <section class="panel">
+        <div>Applied shift: <span id="shift">0</span> semitones</div>
+      </section>
+
+      <section class="controls" aria-label="Extension controls">
+        <button id="analyzeButton" type="button">Analyze Song</button>
+        <button id="enableButton" type="button">Enable Pitch Shift</button>
+        <button id="disableButton" type="button">Disable Pitch Shift</button>
+        <button id="resetButton" type="button">Reset</button>
+      </section>
+
+      <p id="error" class="error" role="alert"></p>
     </main>
   </body>
 </html>
