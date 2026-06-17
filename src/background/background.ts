@@ -51,6 +51,7 @@ function updateState(patch: Partial<ExtensionState>): ExtensionState {
     semitoneShift: getNextShift(nextState)
   };
   broadcastState();
+  syncPitchShiftState();
   return state;
 }
 
@@ -77,6 +78,15 @@ function sendToOffscreen(message: BackgroundToOffscreenMessage): void {
   chrome.runtime.sendMessage(message);
 }
 
+function syncPitchShiftState(): void {
+  if (state.activeTabId === null) return;
+
+  sendToOffscreen({
+    type: "SET_PITCH_SHIFT",
+    semitones: state.isPitchShiftEnabled ? state.semitoneShift : 0
+  });
+}
+
 async function startAnalysis(): Promise<ExtensionState> {
   updateState({ status: "capturing", errorMessage: null });
 
@@ -100,6 +110,10 @@ async function startAnalysis(): Promise<ExtensionState> {
     sendToOffscreen({
       type: "START_KEY_ANALYSIS",
       durationSeconds: ANALYSIS_DURATION_SECONDS
+    });
+
+    sendToOffscreen({
+      type: state.isPitchShiftEnabled ? "ENABLE_PITCH_SHIFT" : "DISABLE_PITCH_SHIFT"
     });
 
     return updateState({
@@ -150,9 +164,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ type: "STATE_UPDATED", state: updateState({ targetKeyGroupId: message.keyGroupId }) });
       return;
     case "ENABLE_PITCH_SHIFT":
+      sendToOffscreen({ type: "ENABLE_PITCH_SHIFT" });
       sendResponse({ type: "STATE_UPDATED", state: updateState({ isPitchShiftEnabled: true, status: "pitch_shift_enabled" }) });
       return;
     case "DISABLE_PITCH_SHIFT":
+      sendToOffscreen({ type: "DISABLE_PITCH_SHIFT" });
       sendResponse({ type: "STATE_UPDATED", state: updateState({ isPitchShiftEnabled: false, status: state.detectedKeyGroupId === null ? "idle" : "detected" }) });
       return;
     case "START_ANALYSIS":
