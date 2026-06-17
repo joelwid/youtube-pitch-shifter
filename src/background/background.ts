@@ -1,7 +1,16 @@
 import { defaultState, type ExtensionState } from "./extension-state.js";
+import { ensureOffscreenDocument } from "./offscreen-manager.js";
+import { getActiveTab, getTabCaptureStreamId, isYouTubeUrl } from "./tab-capture.js";
 import { isKeyGroupId } from "../shared/key-groups.js";
 import { getSemitoneShift } from "../shared/transposition.js";
-import type { BackgroundToPopupMessage, PopupToBackgroundMessage } from "../shared/messages.js";
+import type {
+  BackgroundToOffscreenMessage,
+  BackgroundToPopupMessage,
+  OffscreenToBackgroundMessage,
+  PopupToBackgroundMessage
+} from "../shared/messages.js";
+
+const ANALYSIS_DURATION_SECONDS = 25;
 
 let state: ExtensionState = { ...defaultState };
 
@@ -23,6 +32,13 @@ function isPopupMessage(message: unknown): message is PopupToBackgroundMessage {
   );
 }
 
+function isOffscreenMessage(message: unknown): message is OffscreenToBackgroundMessage {
+  if (typeof message !== "object" || message === null || !("type" in message)) return false;
+
+  const { type } = message as { type: unknown };
+  return type === "AUDIO_SESSION_READY" || type === "AUDIO_ERROR" || type === "KEY_DETECTED" || type === "KEY_DETECTION_FAILED";
+}
+
 function getNextShift(nextState: ExtensionState): number {
   if (nextState.detectedKeyGroupId === null) return 0;
   return getSemitoneShift(nextState.detectedKeyGroupId, nextState.targetKeyGroupId);
@@ -38,6 +54,14 @@ function updateState(patch: Partial<ExtensionState>): ExtensionState {
   return state;
 }
 
+function setError(errorMessage: string): ExtensionState {
+  return updateState({
+    status: "error",
+    errorMessage,
+    isPitchShiftEnabled: false
+  });
+}
+
 function createStateMessage(): BackgroundToPopupMessage {
   return {
     type: "STATE_UPDATED",
@@ -49,7 +73,73 @@ function broadcastState(): void {
   chrome.runtime.sendMessage(createStateMessage());
 }
 
+function sendToOffscreen(message: BackgroundToOffscreenMessage): void {
+  chrome.runtime.sendMessage(message);
+}
+
+async function startAnalysis(): Promise<ExtensionState> {
+  updateState({ status: "capturing", errorMessage: null });
+
+  const tab = await getActiveTab();
+
+  if (!tab || !isYouTubeUrl(tab.url)) {
+    return setError("Open a YouTube video first.");
+  }
+
+  updateState({ activeTabId: tab.id });
+
+  try {
+    await ensureOffscreenDocument();
+    const streamId = await getTabCaptureStreamId(tab.id);
+
+    sendToOffscreen({
+      type: "START_AUDIO_SESSION",
+      streamId
+    });
+
+    sendToOffscreen({
+      type: "START_KEY_ANALYSIS",
+      durationSeconds: ANALYSIS_DURATION_SECONDS
+    });
+
+    return updateState({
+      status: "listening",
+      activeTabId: tab.id
+    });
+  } catch (error) {
+    console.error("Failed to start analysis", error);
+    return setError("Could not capture tab audio. Try reloading the YouTube tab.");
+  }
+}
+
+function handleOffscreenMessage(message: OffscreenToBackgroundMessage): void {
+  switch (message.type) {
+    case "AUDIO_SESSION_READY":
+      updateState({ status: "listening", errorMessage: null });
+      return;
+    case "AUDIO_ERROR":
+      setError(message.reason);
+      return;
+    case "KEY_DETECTED":
+      updateState({
+        status: "detected",
+        detectedKeyGroupId: message.keyGroupId,
+        confidence: message.confidence,
+        errorMessage: null
+      });
+      return;
+    case "KEY_DETECTION_FAILED":
+      setError(message.reason);
+      return;
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (isOffscreenMessage(message)) {
+    handleOffscreenMessage(message);
+    return;
+  }
+
   if (!isPopupMessage(message)) return;
 
   switch (message.type) {
@@ -66,9 +156,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ type: "STATE_UPDATED", state: updateState({ isPitchShiftEnabled: false, status: state.detectedKeyGroupId === null ? "idle" : "detected" }) });
       return;
     case "START_ANALYSIS":
-      sendResponse({ type: "STATE_UPDATED", state: updateState({ status: "listening", errorMessage: null }) });
-      return;
+      startAnalysis()
+        .then((nextState) => sendResponse({ type: "STATE_UPDATED", state: nextState }))
+        .catch((error: unknown) => {
+          console.error("Unexpected analysis error", error);
+          sendResponse({ type: "STATE_UPDATED", state: setError("Could not capture tab audio. Try reloading the YouTube tab.") });
+        });
+      return true;
     case "RESET":
+      sendToOffscreen({ type: "STOP_AUDIO_SESSION" });
       state = { ...defaultState };
       broadcastState();
       sendResponse(createStateMessage());
